@@ -338,7 +338,7 @@ class LoginService {
     http.Response response;
 
     try {
-      if (!kIsWeb && DevelopSettings.useUnsafeServer) {
+      if (!kIsWeb && !DevelopSettings.useLocalServer && DevelopSettings.useUnsafeServer) {
         _baseUrl = 'https://101.132.58.198';
         response = await customHttpPost(
           url,
@@ -405,7 +405,9 @@ class LoginService {
       } else {
         await SharedPreferencesManager.setString(
             'access_token', responseBody['access']);
-        await SecureStorageManager.setString('username', username);
+        await SharedPreferencesManager.setString(
+            'refresh_token', responseBody['refresh']);
+        await SharedPreferencesManager.setString('username', username);
         //不安全 就不保存密码了
       }
       await SharedPreferencesManager.setBool('is_logged_in', true);

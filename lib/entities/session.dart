@@ -9,7 +9,6 @@ import 'package:cloudplayplus/entities/device.dart';
 import 'package:cloudplayplus/services/streamed_manager.dart';
 import 'package:cloudplayplus/services/streaming_manager.dart';
 import 'package:cloudplayplus/services/websocket_service.dart';
-import 'package:cloudplayplus/utils/notifications/notification_manager.dart';
 import 'package:cloudplayplus/utils/widgets/message_box.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -96,6 +95,11 @@ class StreamingSession {
   int screenId = 0;
 
   int cursorImageHookID = 0;
+  int cursorPositionUpdatedHookID = 0;
+  
+  // 标记哪些回调已经注册
+  bool _cursorImageHookRegistered = false;
+  bool _cursorPositionHookRegistered = false;
 
   AudioSession? audioSession;
   int audioBitrate = 32;
@@ -324,10 +328,10 @@ class StreamingSession {
   void acceptRequest(StreamedSettings settings) async {
     await _lock.synchronized(() async {
       // 对于移动平台 需要hookAll,且在channel建立之后hook
-      if (settings.hookCursorImage == true && AppPlatform.isDeskTop && !(controller.devicetype == 'IOS' || controller.devicetype == 'Android')) {
+      /*if (settings.hookCursorImage == true && AppPlatform.isDeskTop && !(controller.devicetype == 'IOS' || controller.devicetype == 'Android')) {
           HardwareSimulator.addCursorImageUpdated(
               onLocalCursorImageMessage, cursorImageHookID, false);
-      }
+      }*/
       if (connectionState != StreamingSessionConnectionState.free &&
           connectionState != StreamingSessionConnectionState.disconnected) {
         VLOG0("starting connection on which is already started. Please debug.");
@@ -336,6 +340,23 @@ class StreamingSession {
       if (controlled.websocketSessionid != AppStateService.websocketSessionid) {
         VLOG0("requiring connection on wrong device. Please debug.");
         return;
+      }
+      //TODO:implement addCursorPositionUpdated for MacOS.
+      if (settings.syncMousePosition == true && AppPlatform.isWindows) {
+          HardwareSimulator.addCursorPositionUpdated((message, screenId, xPercent, yPercent) {
+            if (message == HardwareSimulator.CURSOR_POSITION_CHANGED && image_hooked) {
+              //print("CURSOR_POSITION_CHANGED: $xPercent, $yPercent");
+              ByteData byteData = ByteData(17);
+              byteData.setUint8(0, LP_MOUSECURSOR_CHANGED);
+              byteData.setInt32(1, message);
+              byteData.setInt32(5, screenId);
+              byteData.setFloat32(9, xPercent, Endian.little);
+              byteData.setFloat32(13, yPercent, Endian.little);
+              Uint8List buffer = byteData.buffer.asUint8List();
+              channel?.send(RTCDataChannelMessage.fromBinary(buffer));
+            }
+          }, cursorPositionUpdatedHookID);
+          _cursorPositionHookRegistered = true;
       }
       selfSessionType = SelfSessionType.controlled;
       restartPingTimeoutTimer(10);
@@ -444,12 +465,15 @@ class StreamingSession {
           await pc!.createDataChannel('userInput', reliableDataChannelDict);
 
       channel?.onMessage = (RTCDataChannelMessage msg) {
-        if (!image_hooked) {
-          if (streamSettings!.hookCursorImage == true && controller.devicetype == 'IOS' || controller.devicetype == 'Android') {
-              HardwareSimulator.addCursorImageUpdated(
-                  onLocalCursorImageMessage, cursorImageHookID, true);
+        if (!image_hooked && !AppPlatform.isWeb) {
+          bool hookall = false;
+          if (AppPlatform.isDeskTop && (controller.devicetype == 'IOS' || controller.devicetype == 'Android')) {
+            hookall = true;
           }
+          HardwareSimulator.addCursorImageUpdated(
+              onLocalCursorImageMessage, cursorImageHookID, hookall);
           image_hooked = true;
+          _cursorImageHookRegistered = true;
         }
         processDataChannelMessageFromClient(msg);
       };
@@ -677,11 +701,24 @@ class StreamingSession {
           StreamingSessionConnectionState.disconnected;
       connectionState = StreamingSessionConnectionState.disconnected;
       //controlled.connectionState.value = StreamingSessionConnectionState.free;
-      if (streamSettings?.hookCursorImage == true &&
-          selfSessionType == SelfSessionType.controlled) {
+      if (_cursorImageHookRegistered && selfSessionType == SelfSessionType.controlled) {
         if (AppPlatform.isDeskTop) {
           HardwareSimulator.removeCursorImageUpdated(cursorImageHookID);
+          _cursorImageHookRegistered = false;
         }
+      }
+      if (_cursorPositionHookRegistered && selfSessionType == SelfSessionType.controlled) {
+        //TODO:implement for MacOS
+        if (AppPlatform.isWindows) {
+            HardwareSimulator.removeCursorPositionUpdated(cursorPositionUpdatedHookID);
+            _cursorPositionHookRegistered = false;
+        }
+      }
+      if (selfSessionType == SelfSessionType.controlled && (AppPlatform.isWindows)) {
+        await HardwareSimulator.clearAllPressedEvents();
+      }
+      if (selfSessionType == SelfSessionType.controller && (AppPlatform.isMobile || AppPlatform.isAndroidTV)) {
+        InputController.mouseController.setHasMoved(false);
       }
       if (WebrtcService.currentRenderingSession == this) {
         if (HardwareSimulator.cursorlocked) {
@@ -726,6 +763,19 @@ class StreamingSession {
       int message, int messageInfo, Uint8List cursorImage) {
     if (message == HardwareSimulator.CURSOR_UPDATED_IMAGE) {
       channel?.send(RTCDataChannelMessage.fromBinary(cursorImage));
+    } else if (message == HardwareSimulator.CURSOR_VISIBLE) {
+      ByteData byteData = ByteData(17);
+      byteData.setUint8(0, LP_MOUSECURSOR_CHANGED);
+      byteData.setInt32(1, message);
+      byteData.setInt32(5, messageInfo);
+      ByteData locationData = ByteData.sublistView(cursorImage);
+      double xPercent = locationData.getFloat32(0, Endian.little);
+      double yPercent = locationData.getFloat32(4, Endian.little);
+      byteData.setFloat32(9, xPercent);
+      byteData.setFloat32(13, yPercent);
+      VLOG0("cursor is visible: xPercent: $xPercent, yPercent: $yPercent");
+      Uint8List buffer = byteData.buffer.asUint8List();
+      channel?.send(RTCDataChannelMessage.fromBinary(buffer));
     } else {
       ByteData byteData = ByteData(9);
       byteData.setUint8(0, LP_MOUSECURSOR_CHANGED);

@@ -41,6 +41,7 @@ class StreamingManager {
   }
 */
   static void stopStreaming(Device target) {
+    VLOG0("stopStreaming: $target.websocketSessionid");
     if (sessions.containsKey(target.websocketSessionid)) {
       StreamingSession? session = sessions[target.websocketSessionid];
       session?.stop();
@@ -52,6 +53,7 @@ class StreamingManager {
     if (sessions.isEmpty) {
       //TODO(Haichao:fix ConcurrentModificationError when sometimes disconnecting)
       Future.delayed(const Duration(milliseconds: 1000), () {
+        //add lock.sync
         CustomMouseCursor.disposeAll();
       });
     }

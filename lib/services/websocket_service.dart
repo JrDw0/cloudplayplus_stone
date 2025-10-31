@@ -56,7 +56,7 @@ class WebSocketService {
         _baseUrl = "ws://127.0.0.1:8000/ws/";
       }
     }
-    if (!kIsWeb && DevelopSettings.useUnsafeServer) {
+    if (!kIsWeb && !DevelopSettings.useLocalServer && DevelopSettings.useUnsafeServer) {
       _baseUrl = 'ws://101.132.58.198:8001/ws/';
     }
     String? accessToken;
@@ -174,8 +174,6 @@ class WebSocketService {
           AppStateService.websocketSessionid = data['connection_id'];
           ApplicationInfo.user =
               User(uid: data['uid'], nickname: data['nickname']);
-          ApplicationInfo.screencount =
-              await HardwareSimulator.getMonitorCount();
           send('updateDeviceInfo', {
             'deviceName': ApplicationInfo.deviceName,
             'deviceType': ApplicationInfo.deviceTypeName,

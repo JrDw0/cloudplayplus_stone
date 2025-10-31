@@ -11,6 +11,7 @@ import 'package:cloudplayplus/utils/widgets/on_screen_mouse.dart';
 import 'package:cloudplayplus/utils/widgets/virtual_gamepad/control_manager.dart';
 import 'package:cloudplayplus/utils/widgets/virtual_gamepad/gamepad_keys.dart';
 import 'package:cloudplayplus/utils/widgets/virtual_gamepad/virtual_gamepad.dart';
+import 'package:cloudplayplus/widgets/video_info_widget.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -279,11 +280,15 @@ class _VideoScreenState extends State<GlobalRemoteScreenRenderer> {
 
   static int initcount = 0;
 
+  void _handleKeyBlocked(int keyCode, bool isDown) {
+    WebrtcService.currentRenderingSession?.inputController
+        ?.requestKeyEvent(keyCode, isDown);
+  }
+
   @override
   void initState() {
     super.initState();
     _scrollController.onScroll = (dx, dy) {
-      // 发送事件到远程桌面
       if (dx.abs() > 0 || dy.abs() > 0) {
         WebrtcService.currentRenderingSession?.inputController
             ?.requestMouseScroll(dx * 10, dy * 10);
@@ -294,13 +299,44 @@ class _VideoScreenState extends State<GlobalRemoteScreenRenderer> {
        HardwareSimulator.lockCursor();
     }
     WakelockPlus.enable();
+    if (AppPlatform.isWindows) {
+      HardwareSimulator.addKeyBlocked(_handleKeyBlocked);
+      focusNode.addListener(() {
+        if (focusNode.hasFocus) {
+          HardwareSimulator.putImmersiveModeEnabled(true);
+        } else {
+          HardwareSimulator.putImmersiveModeEnabled(false);
+        }
+      });
+    }
     initcount++;
+  }
+
+  void onHardwareCursorPositionUpdateRequested(double x, double y) {
+    if (renderBox == null || parentBox == null) return;
+    //print("onHardwareCursorPositionUpdateRequested: renderBox(${x.toStringAsFixed(3)}, ${y.toStringAsFixed(3)})");
+    try {
+      final screenSize = MediaQuery.of(context).size;
+
+      final Offset globalPosition = renderBox!.localToGlobal(Offset(renderBox!.size.width * x, renderBox!.size.height * y));
+      final double targetXInWindow = (globalPosition.dx / screenSize.width).clamp(0.0, 1.0);
+      final double targetYInWindow = (globalPosition.dy / screenSize.height).clamp(0.0, 1.0);
+
+      HardwareSimulator.mouse.performMouseMoveToWindowPosition(targetXInWindow, targetYInWindow);
+      
+      VLOG0("Hardware cursor position updated: renderBox(${x.toStringAsFixed(3)}, ${y.toStringAsFixed(3)}) -> window(${targetXInWindow.toStringAsFixed(3)}, ${targetYInWindow.toStringAsFixed(3)})");
+    } catch (e) {
+      VLOG0("Error updating hardware cursor position: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     // set the default focus to remote desktop.
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (AppPlatform.isDeskTop) {
+        InputController.cursorPositionCallback = onHardwareCursorPositionUpdateRequested;
+      }
       focusNode.requestFocus();
     });
     /*WebrtcService.audioStateChanged = onAudioRenderStateChanged;*/
@@ -578,7 +614,7 @@ class _VideoScreenState extends State<GlobalRemoteScreenRenderer> {
                   'You pressed: $_pressedKey',
                   style: TextStyle(fontSize: 24, color: Colors.red),
                 ),*/
-                if ((AppPlatform.isAndroidTV) || (AppPlatform.isMobile && AppStateService.isMouseConnected))
+                if ((AppPlatform.isAndroidTV) || (AppPlatform.isMobile /*&& AppStateService.isMouseConnected*/))
                   OnScreenRemoteMouse(
                   controller: InputController.mouseController,
                   onPositionChanged: (percentage) {
@@ -599,6 +635,17 @@ class _VideoScreenState extends State<GlobalRemoteScreenRenderer> {
                     : Container(),*/
                 const OnScreenVirtualGamepad(),
                 const OnScreenVirtualKeyboard(), // 放置在Stack中，独立于Listener和RawKeyboardListener,
+                const Positioned(
+                  top: 20,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    ignoring: true,
+                    child: Center(
+                      child: VideoInfoWidget(),
+                    ),
+                  ),
+                ),
                 OnScreenVirtualMouse(
                     initialPosition: _virtualMousePosition,
                     onPositionChanged: (pos) {
@@ -650,7 +697,7 @@ class _VideoScreenState extends State<GlobalRemoteScreenRenderer> {
               ],
             );
           }
-
+          return const SizedBox.shrink();
           // We need to calculate and define the size if we want to show the remote screen in a scroll view.
           // Keep this code just to make user able to scroll the content in the future.
           return ValueListenableBuilder<double>(
@@ -697,6 +744,13 @@ class _VideoScreenState extends State<GlobalRemoteScreenRenderer> {
 
   @override
   void dispose() {
+    focusNode.dispose();
+    if (AppPlatform.isWindows) {
+      HardwareSimulator.putImmersiveModeEnabled(false);
+      HardwareSimulator.removeKeyBlocked(_handleKeyBlocked);
+      InputController.cursorPositionCallback = null;
+    }
+    _scrollController.dispose(); // 清理滚动控制器资源
     aspectRatioNotifier.dispose(); // 销毁时清理 ValueNotifier
     ControlManager().removeEventListener(_handleControlEvent);
 

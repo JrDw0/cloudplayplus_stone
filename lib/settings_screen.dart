@@ -1,6 +1,8 @@
 import 'package:cloudplayplus/controller/hardware_input_controller.dart';
+import 'package:cloudplayplus/controller/screen_controller.dart';
 import 'package:cloudplayplus/dev_settings.dart/develop_settings.dart';
 import 'package:cloudplayplus/global_settings/streaming_settings.dart';
+import 'package:cloudplayplus/pages/display_manager_page.dart';
 import 'package:cloudplayplus/pages/login_screen.dart';
 import 'package:cloudplayplus/services/app_info_service.dart';
 import 'package:cloudplayplus/services/login_service.dart';
@@ -9,6 +11,7 @@ import 'package:cloudplayplus/services/websocket_service.dart';
 import 'package:cloudplayplus/utils/widgets/text_field_wrapper.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:native_textfield_tv/native_textfield_tv.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -95,6 +98,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     screen: VirtualGamepadSettingsPage(
                       controlManager: ControlManager(),
                     ),
+                    style: NavigationRouteStyle.cupertino,
+                  );
+                },
+              ),
+              if (AppPlatform.isWindows)SettingsTile.navigation(
+                leading: const Icon(Icons.gamepad),
+                title: const Text('虚拟显示器设置'),
+                onPressed: (context) {
+                  Navigation.navigateTo(
+                    context: context,
+                    screen: DisplayManagerPage(),
+                    style: NavigationRouteStyle.cupertino,
+                  );
+                },
+              ),
+            ],
+          ),
+          if (!AppPlatform.isDeskTop)
+          SettingsSection(
+            title: const Text('显示设置'),
+            tiles: [
+              SettingsTile.navigation(
+                leading: const Icon(Icons.display_settings),
+                title: const Text('屏幕朝向设置'),
+                onPressed: (context) {
+                  Navigation.navigateTo(
+                    context: context,
+                    screen: const DisplaySettingsScreen(),
                     style: NavigationRouteStyle.cupertino,
                   );
                 },
@@ -333,7 +364,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SettingsSection(title: const Text('版本号'), tiles: <SettingsTile>[
             SettingsTile(
-              title: const Text('1.0.7'),
+              title: const Text('1.0.8'),
               leading: const Icon(Icons.sunny),
             ),
             if (AppPlatform.isMobile)
@@ -588,6 +619,18 @@ class _StreamingSettingsScreen extends State<StreamingSettingsScreen> {
                           'frameRate', framerate);
                       StreamingSettings.framerate = framerate;
                     }
+                  },
+                ),
+                SettingsTile.switchTile(
+                  title: const Text('显示串流统计信息'),
+                  leading: const Icon(Icons.speed),
+                  initialValue: StreamingSettings.isStreamingStateEnabled??false,
+                  onToggle: (bool value) {
+                    setState(() {
+                      ScreenController.setShowVideoInfo(value);
+                      SharedPreferencesManager.setBool('streamingState', value);
+                      StreamingSettings.isStreamingStateEnabled = value;
+                    });
                   },
                 ),
               ],
@@ -1152,5 +1195,155 @@ class _CursorSettingsScreenState extends State<CursorSettingsScreen> {
         ),
       ),
     );
+  }
+}
+
+class DisplaySettingsScreen extends StatefulWidget {
+  const DisplaySettingsScreen({Key? key}) : super(key: key);
+
+  @override
+  State<DisplaySettingsScreen> createState() => _DisplaySettingsScreenState();
+}
+
+class _DisplaySettingsScreenState extends State<DisplaySettingsScreen> {
+  int _screenOrientation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    _screenOrientation = SharedPreferencesManager.getInt('screenOrientation') ?? 0;
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('显示设置'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: ListView(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.screen_rotation),
+            title: const Text('默认 - 跟随系统'),
+            subtitle: const Text('使用系统默认的屏幕朝向设置'),
+            trailing: _screenOrientation == 0 ? const Icon(Icons.check, color: Colors.blue) : null,
+            onTap: () {
+              setState(() {
+                _screenOrientation = 0;
+                SharedPreferencesManager.setInt('screenOrientation', _screenOrientation);
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.portraitUp,
+                  DeviceOrientation.portraitDown,
+                  DeviceOrientation.landscapeLeft,
+                  DeviceOrientation.landscapeRight,
+                ]);
+              });
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.screen_lock_portrait),
+            title: const Text('竖屏'),
+            subtitle: const Text('强制应用保持竖屏模式'),
+            trailing: _screenOrientation == 1 ? const Icon(Icons.check, color: Colors.blue) : null,
+            onTap: () {
+              setState(() {
+                _screenOrientation = 1;
+                SharedPreferencesManager.setInt('screenOrientation', _screenOrientation);
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.portraitUp,
+                ]);
+              });
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.screen_lock_landscape),
+            title: const Text('横屏'),
+            subtitle: const Text('强制应用保持横屏模式'),
+            trailing: _screenOrientation == 2 ? const Icon(Icons.check, color: Colors.blue) : null,
+            onTap: () {
+              setState(() {
+                _screenOrientation = 2;
+                SharedPreferencesManager.setInt('screenOrientation', _screenOrientation);
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.landscapeLeft,
+                ]);
+              });
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.screen_lock_portrait),
+            title: const Text('反向竖屏'),
+            subtitle: const Text('强制应用保持反向竖屏模式'),
+            trailing: _screenOrientation == 3 ? const Icon(Icons.check, color: Colors.blue) : null,
+            onTap: () {
+              setState(() {
+                _screenOrientation = 3;
+                SharedPreferencesManager.setInt('screenOrientation', _screenOrientation);
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.portraitDown,
+                ]);
+              });
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.screen_lock_landscape),
+            title: const Text('反向横屏'),
+            subtitle: const Text('强制应用保持反向横屏模式'),
+            trailing: _screenOrientation == 4 ? const Icon(Icons.check, color: Colors.blue) : null,
+            onTap: () {
+              setState(() {
+                _screenOrientation = 4;
+                SharedPreferencesManager.setInt('screenOrientation', _screenOrientation);
+                SystemChrome.setPreferredOrientations([
+                  DeviceOrientation.landscapeRight,
+                ]);
+              });
+            },
+          ),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              '当前设置：${_getOrientationDescription(_screenOrientation)}',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getOrientationDescription(int orientation) {
+    switch (orientation) {
+      case 0:
+        return '默认 - 跟随系统设置';
+      case 1:
+        return '竖屏 - Portrait';
+      case 2:
+        return '横屏 - Landscape';
+      case 3:
+        return '反向竖屏 - Portrait Upside Down';
+      case 4:
+        return '反向横屏 - Landscape Upside Down';
+      default:
+        return '未知设置';
+    }
   }
 }

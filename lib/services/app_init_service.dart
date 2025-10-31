@@ -1,4 +1,6 @@
+import 'package:cloudplayplus/base/logging.dart';
 import 'package:cloudplayplus/services/login_service.dart';
+import 'package:cloudplayplus/services/websocket_service.dart';
 import 'package:hardware_simulator/hardware_simulator.dart';
 
 import '../dev_settings.dart/develop_settings.dart';
@@ -54,6 +56,24 @@ class AppInitService {
     appInitState = getAppState();
     ApplicationInfo.connectable =
         SharedPreferencesManager.getBool('allowConnect') ?? false;
+    ApplicationInfo.screencount = await HardwareSimulator.getMonitorCount();
+    //TODO:implement for other platforms
+    if (AppPlatform.isWindows) {
+      HardwareSimulator.initParsecVdd();
+      ApplicationInfo.screencount = await HardwareSimulator.getAllDisplays();
+      HardwareSimulator.addDisplayCountChangedCallback((displayCount) {
+        VLOG0("display count changed: $displayCount");
+        ApplicationInfo.screencount = displayCount;
+        if (WebSocketService.connectionState == WebSocketConnectionState.connected) {
+          WebSocketService.updateDeviceInfo();
+        }
+        // 完成全局的显示器数量变化Completer
+        if (ApplicationInfo.displayCountChangedCompleter != null && 
+            !ApplicationInfo.displayCountChangedCompleter!.isCompleted) {
+          ApplicationInfo.displayCountChangedCompleter!.complete();
+        }
+      }, 0);
+    }
     bool? isSystem = await HardwareSimulator.isRunningAsSystem();
     if (isSystem == false) {
       ApplicationInfo.isSystem = false;
